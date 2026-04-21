@@ -1,0 +1,32 @@
+# SafeStay v2.3 — Full Dependency List
+# pip install -r requirements.txt
+
+# ── Web Framework ──────────────────────────────────────────────────────────────
+fastapi>=0.111.0
+uvicorn[standard]>=0.29.0
+pydantic>=2.6.0
+
+# ── Frontend ───────────────────────────────────────────────────────────────────
+streamlit>=1.35.0
+
+# ── AI / Computer Vision ──────────────────────────────────────────────────────
+ultralytics>=8.2.0          # YOLOv8
+opencv-python>=4.9.0
+numpy>=1.26.0
+Pillow>=10.3.0
+
+# ── 3D Visualisation ──────────────────────────────────────────────────────────
+pyvista>=0.43.0             # Primary 3D engine
+matplotlib>=3.8.0           # Fallback 3D renderer
+
+# ── Network Security ──────────────────────────────────────────────────────────
+scapy>=2.5.0
+
+# ── Cryptography / Forensics ──────────────────────────────────────────────────
+cryptography>=42.0.0        # RSA-2048 signing
+reportlab>=4.1.0            # PDF certificate generation
+
+# ── Data / Utils ──────────────────────────────────────────────────────────────
+requests>=2.31.0
+pandas>=2.2.0
+python-dotenv>=1.0.0
