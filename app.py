@@ -1,753 +1,682 @@
-import streamlit as st
-import time
-import random
+"""
+SafeStay — app.py
+Streamlit 3D Security Dashboard.
+Dark Mode Security theme: Midnight Navy (#0A0E1A) + Safety Green (#2ECC71).
 
-# ── PAGE CONFIG ──
+Features:
+  • 3D Digital Twin with PyVista / Matplotlib threat markers
+  • 60-second 4-layer interactive scan simulation
+  • Live FastAPI backend connectivity
+  • Forensic PDF generation + RSA integrity verification
+"""
+
+from __future__ import annotations
+
+import asyncio
+import hashlib
+import json
+import sys
+import time
+from pathlib import Path
+
+import requests
+import streamlit as st
+
+# ── Add components to path ───────────────────────────────────────────────────
+sys.path.insert(0, str(Path(__file__).parent / "components"))
+from visualizer import render_room, render_empty_room, build_markers_from_scan  # type: ignore
+
+# ── Config ────────────────────────────────────────────────────────────────────
+API_BASE   = "http://localhost:8000"
+PAGE_TITLE = "SafeStay — AI Privacy Shield"
+
+# ── Streamlit Page Config ─────────────────────────────────────────────────────
 st.set_page_config(
-    page_title="SafeStay – By Gradient Forge",
-    page_icon="⊕",
-    layout="wide",
-    initial_sidebar_state="collapsed",
+    page_title = PAGE_TITLE,
+    page_icon  = "🛡",
+    layout     = "wide",
+    initial_sidebar_state = "expanded",
 )
 
-# ── GLOBAL CSS ──
+# ── Global CSS (Dark Mode Security theme) ─────────────────────────────────────
 st.markdown("""
 <style>
-@import url('https://fonts.googleapis.com/css2?family=Montserrat:wght@400;500;600;700;800;900&family=JetBrains+Mono:wght@400;500;600&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Space+Mono:wght@400;700&family=Syne:wght@700;800&display=swap');
 
-:root {
-    --bg: #0A0E1A;
-    --bg2: #0d1220;
-    --card: #131929;
-    --card-border: #1e2a3a;
-    --green: #2ECC71;
-    --green-glow: rgba(46,204,113,0.15);
-    --red: #E74C3C;
-    --text: #e8edf5;
-    --muted: #6b7a96;
-    --muted2: #8892a4;
-}
-
+/* ── Base ── */
 html, body, [data-testid="stAppViewContainer"] {
-    background-color: #0A0E1A !important;
-    color: #e8edf5 !important;
-    font-family: 'Montserrat', sans-serif !important;
+    background: #0A0E1A !important;
+    color: #E8EAF6 !important;
+    font-family: 'Syne', sans-serif !important;
 }
-
+[data-testid="stSidebar"] {
+    background: #0F1528 !important;
+    border-right: 1px solid rgba(46,204,113,.15) !important;
+}
 [data-testid="stHeader"] { background: transparent !important; }
-[data-testid="stSidebar"] { background: #0d1220 !important; }
 
-/* Remove default Streamlit padding */
-.block-container { padding-top: 0 !important; max-width: 1200px; }
-section[data-testid="stVerticalBlock"] { gap: 0 !important; }
-
-/* NAVBAR */
-.ss-nav {
-    position: sticky; top: 0; z-index: 100;
-    display: flex; align-items: center; justify-content: space-between;
-    padding: 0 40px; height: 72px;
-    background: rgba(10,14,26,0.95);
-    backdrop-filter: blur(12px);
-    border-bottom: 1px solid #1e2a3a;
-    margin-bottom: 0;
-}
-.nav-logo { display: flex; align-items: center; gap: 10px; }
-.nav-logo-icon {
-    width: 36px; height: 36px; border-radius: 8px;
-    background: rgba(46,204,113,0.15); border: 1.5px solid #2ECC71;
-    display: inline-flex; align-items: center; justify-content: center;
-    color: #2ECC71; font-size: 16px;
-}
-.brand { font-size: 15px; font-weight: 700; color: #e8edf5; }
-.sub { font-size: 9px; font-weight: 500; letter-spacing: 0.15em; color: #6b7a96; text-transform: uppercase; }
-.nav-links { display: flex; gap: 36px; }
-.nav-links a {
-    font-size: 11px; font-weight: 600; letter-spacing: 0.12em;
-    text-transform: uppercase; color: #8892a4; text-decoration: none;
-}
-.nav-links a:hover { color: #e8edf5; }
-.btn-cta {
-    background: #2ECC71; color: #0A0E1A;
-    font-size: 12px; font-weight: 700; letter-spacing: 0.06em; text-transform: uppercase;
-    padding: 10px 22px; border-radius: 6px; text-decoration: none;
-    display: inline-flex; align-items: center;
-}
-
-/* HERO */
-.ss-hero {
-    padding: 80px 80px 60px;
-    display: grid; grid-template-columns: 1fr 380px; gap: 60px;
-    align-items: center; max-width: 1200px; margin: 0 auto;
-}
-.hero-badge {
-    display: inline-flex; align-items: center; gap: 8px;
-    background: rgba(19,25,41,0.9); border: 1px solid #1e2a3a;
-    padding: 6px 14px; border-radius: 4px;
-    font-size: 10px; font-weight: 600; letter-spacing: 0.15em; color: #8892a4;
-    text-transform: uppercase; margin-bottom: 28px;
-}
-.hero-badge-dot {
-    width: 7px; height: 7px; border-radius: 50%; background: #2ECC71;
-    display: inline-block; animation: pulseDot 2s infinite;
-}
-@keyframes pulseDot { 0%,100%{opacity:1} 50%{opacity:0.4} }
-.hero-h1 {
-    font-size: 62px; font-weight: 900; line-height: 1.05;
-    margin-bottom: 24px; letter-spacing: -0.02em; color: #e8edf5;
-}
-.hero-h1 .accent { color: #E74C3C; text-decoration: underline; text-decoration-color: #E74C3C; }
-.hero-sub { font-size: 16px; color: #8892a4; max-width: 480px; margin-bottom: 40px; line-height: 1.7; }
-.hero-sub strong { color: #e8edf5; }
-.hero-actions { display: flex; align-items: center; gap: 28px; margin-bottom: 50px; }
-.btn-scan {
-    background: #2ECC71; color: #0A0E1A;
-    font-size: 14px; font-weight: 700;
-    padding: 14px 28px; border-radius: 8px;
-    text-decoration: none; display: inline-flex; align-items: center; gap: 10px;
-    animation: pulseBtn 2.5s infinite;
-}
-@keyframes pulseBtn {
-    0%,100% { box-shadow: 0 0 0 0 rgba(46,204,113,0.4); }
-    50% { box-shadow: 0 0 0 12px rgba(46,204,113,0); }
-}
-.hero-stats { display: flex; gap: 48px; }
-.hero-stat .num { font-size: 22px; font-weight: 800; color: #e8edf5; }
-.hero-stat .lbl { font-size: 9px; font-weight: 600; letter-spacing: 0.14em; text-transform: uppercase; color: #6b7a96; margin-top: 2px; }
-
-/* RADAR WIDGET */
-.radar-widget {
-    background: #131929; border: 1px solid #1e2a3a;
-    border-radius: 12px; overflow: hidden;
-}
-.radar-top {
-    display: flex; justify-content: space-between; align-items: center;
-    padding: 14px 18px; border-bottom: 1px solid #1e2a3a;
-}
-.radar-top span { font-size: 10px; font-weight: 600; letter-spacing: 0.14em; text-transform: uppercase; color: #6b7a96; }
-.radar-online { color: #2ECC71 !important; display: flex; align-items: center; gap: 6px; }
-.radar-online::before { content:''; display:inline-block; width:7px; height:7px; border-radius:50%; background:#2ECC71; }
-.radar-bottom { display: flex; justify-content: space-between; padding: 14px 18px; }
-.radar-bottom .rl { font-size: 10px; color: #6b7a96; text-transform: uppercase; }
-.radar-anomalies { font-size: 11px; font-weight: 700; color: #E74C3C; }
-
-/* SECTION COMMON */
-.ss-section { padding: 80px 80px; max-width: 1200px; margin: 0 auto; }
-.section-label {
-    display: flex; align-items: center; gap: 10px;
-    font-size: 10px; font-weight: 600; letter-spacing: 0.2em;
-    text-transform: uppercase; color: #E74C3C; margin-bottom: 28px;
-}
-.section-label-line { width: 28px; height: 2px; background: #E74C3C; }
-.section-label.green { color: #2ECC71; }
-.section-label.green .section-label-line { background: #2ECC71; }
-.section-divider { height: 1px; background: #1e2a3a; max-width: 1200px; margin: 0 auto; }
-
-/* THREAT */
-.threat-header { display: grid; grid-template-columns: 1fr 1fr; gap: 60px; margin-bottom: 60px; align-items: end; }
-.threat-h2 { font-size: 48px; font-weight: 900; line-height: 1.1; letter-spacing: -0.02em; color: #e8edf5; }
-.threat-h2 .dim { color: #6b7a96; }
-.threat-desc { font-size: 15px; color: #8892a4; line-height: 1.75; max-width: 380px; }
-.stat-cards { display: grid; grid-template-columns: repeat(3,1fr); gap: 18px; }
-.stat-card {
-    background: #131929; border: 1px solid #1e2a3a;
-    border-radius: 10px; padding: 28px 24px; position: relative; overflow: hidden;
-}
-.stat-card::before {
-    content:''; position:absolute; inset:0;
-    background: linear-gradient(135deg, rgba(231,76,60,0.08) 0%, transparent 60%);
-    pointer-events:none;
-}
-.stat-card-top { display:flex; justify-content:space-between; align-items:center; margin-bottom:24px; }
-.stat-card-icon { color: #E74C3C; font-size: 18px; }
-.stat-card-num-label { font-family: 'JetBrains Mono', monospace; font-size: 11px; color: #6b7a96; }
-.stat-card-num { font-size: 52px; font-weight: 900; color: #E74C3C; line-height: 1; margin-bottom: 12px; }
-.stat-card-title { font-size: 10px; font-weight: 700; letter-spacing: 0.15em; text-transform: uppercase; color: #8892a4; margin-bottom: 12px; }
-.stat-card-desc { font-size: 13px; color: #6b7a96; line-height: 1.6; }
-.threat-sources { margin-top: 20px; font-family: 'JetBrains Mono', monospace; font-size: 10px; color: #6b7a96; letter-spacing: 0.1em; text-transform: uppercase; }
-
-/* TECHNOLOGY */
-.tech-header { margin-bottom: 60px; display: grid; grid-template-columns: 1fr 1fr; gap: 60px; align-items: end; }
-.tech-h2 { font-size: 48px; font-weight: 900; line-height: 1.1; letter-spacing: -0.02em; color: #e8edf5; }
-.tech-h2 .green { color: #2ECC71; }
-.tech-desc { font-size: 15px; color: #8892a4; line-height: 1.75; max-width: 380px; }
-.tech-grid { display: grid; grid-template-columns: 2fr 1fr; gap: 18px; }
-.tech-card { background: #131929; border: 1px solid #1e2a3a; border-radius: 10px; overflow: hidden; }
-.tech-card-body { padding: 28px; }
-.tech-card-top { display: flex; justify-content: space-between; align-items: center; margin-bottom: 18px; }
-.tech-card-icon-box {
-    width: 36px; height: 36px; border-radius: 7px;
-    background: rgba(46,204,113,0.15); border: 1px solid rgba(46,204,113,0.3);
-    display: inline-flex; align-items: center; justify-content: center;
-    color: #2ECC71; font-size: 16px;
-}
-.tech-card-layer { font-family: 'JetBrains Mono', monospace; font-size: 10px; color: #6b7a96; display: flex; align-items: center; gap: 6px; }
-.tech-card-title { font-size: 22px; font-weight: 700; margin-bottom: 12px; color: #e8edf5; }
-.tech-card-desc { font-size: 14px; color: #8892a4; line-height: 1.65; margin-bottom: 20px; }
-.tech-card-tags { display: flex; flex-direction: column; gap: 6px; }
-.tech-tag { font-family: 'JetBrains Mono', monospace; font-size: 10px; color: #2ECC71; display: flex; align-items: center; gap: 8px; }
-.tech-tag::before { content:''; display:inline-block; width:6px; height:6px; border-radius:50%; background:#2ECC71; }
-.live-badge {
-    display: inline-block;
-    background: rgba(19,25,41,0.9); border: 1px solid #1e2a3a;
-    padding: 4px 10px; border-radius: 4px;
-    font-family: 'JetBrains Mono', monospace; font-size: 10px; font-weight: 600; color: #2ECC71;
-}
-.tech-live-feed {
-    background: #060d0a; position: relative; overflow: hidden;
-    height: 160px; display: flex; align-items: center; justify-content: center;
-    background-image: repeating-linear-gradient(to bottom, transparent 0px, transparent 3px, rgba(0,0,0,0.15) 3px, rgba(0,0,0,0.15) 4px),
-                      linear-gradient(rgba(46,204,113,0.06) 1px, transparent 1px),
-                      linear-gradient(90deg, rgba(46,204,113,0.06) 1px, transparent 1px);
-    background-size: 4px 4px, 30px 30px, 30px 30px;
-    padding: 12px;
-}
-
-/* SIMULATION */
-.sim-terminal { background: #131929; border: 1px solid #1e2a3a; border-radius: 10px; overflow: hidden; }
-.sim-titlebar {
-    display: flex; align-items: center; justify-content: space-between;
-    padding: 12px 20px; background: rgba(0,0,0,0.2); border-bottom: 1px solid #1e2a3a;
-}
-.sim-dots { display: flex; gap: 6px; }
-.sim-dots span { width: 12px; height: 12px; border-radius: 50%; display: inline-block; }
-.sim-dot-r { background: #ff5f57; }
-.sim-dot-y { background: #febc2e; }
-.sim-dot-g { background: #28c840; }
-.sim-session { font-family: 'JetBrains Mono', monospace; font-size: 11px; color: #6b7a96; letter-spacing: 0.1em; }
-.sim-phases { display: grid; grid-template-columns: repeat(3,1fr); border-bottom: 1px solid #1e2a3a; }
-.sim-phase {
-    padding: 16px 20px; border-right: 1px solid #1e2a3a;
-    display: flex; align-items: center; justify-content: space-between;
-}
-.sim-phase:last-child { border-right: none; }
-.sim-phase-left { display: flex; align-items: center; gap: 10px; }
-.sim-phase-icon {
-    width: 28px; height: 28px; border-radius: 6px;
-    background: rgba(46,204,113,0.1); border: 1px solid rgba(46,204,113,0.2);
-    display: inline-flex; align-items: center; justify-content: center;
-    font-size: 13px;
-}
-.ph-label { font-size: 9px; font-weight: 600; letter-spacing: 0.12em; text-transform: uppercase; color: #6b7a96; }
-.ph-name { font-size: 13px; font-weight: 600; color: #e8edf5; }
-.sim-check { font-size: 16px; color: #6b7a96; }
-.sim-check.done { color: #2ECC71; }
-.sim-log {
-    height: 280px; overflow-y: auto; padding: 20px;
-    font-family: 'JetBrains Mono', monospace; font-size: 12px; line-height: 1.8;
-    color: #8892a4; background: rgba(0,0,0,0.2);
-}
-.log-green { color: #2ECC71; }
-.log-red { color: #E74C3C; }
-.log-header { color: #e8edf5; font-weight: 600; }
-.log-dim { color: #6b7a96; }
-
-/* TRUST */
-.trust-cards { display: grid; grid-template-columns: repeat(4,1fr); gap: 18px; margin-bottom: 50px; }
-.trust-card { background: #131929; border: 1px solid #1e2a3a; border-radius: 10px; padding: 28px 22px; }
-.trust-card-icon {
-    width: 40px; height: 40px; border-radius: 8px;
-    background: rgba(46,204,113,0.15); border: 1px solid rgba(46,204,113,0.25);
-    display: inline-flex; align-items: center; justify-content: center;
-    font-size: 18px; margin-bottom: 18px;
-}
-.trust-card-title { font-size: 15px; font-weight: 700; margin-bottom: 12px; color: #e8edf5; }
-.trust-card-desc { font-size: 13px; color: #8892a4; line-height: 1.65; }
-
-/* CTA BANNER */
-.cta-banner {
-    background: linear-gradient(135deg, rgba(46,204,113,0.08) 0%, rgba(19,25,41,1) 60%);
-    border: 1px solid rgba(46,204,113,0.2); border-radius: 12px;
-    padding: 48px; display: flex; align-items: center; justify-content: space-between; gap: 40px;
-}
-.cta-banner-label { font-family: 'JetBrains Mono', monospace; font-size: 10px; font-weight: 600; letter-spacing: 0.18em; text-transform: uppercase; color: #2ECC71; margin-bottom: 16px; }
-.cta-banner-title { font-size: 24px; font-weight: 800; line-height: 1.3; color: #e8edf5; }
-
-/* FOOTER */
-.ss-footer {
-    border-top: 1px solid #1e2a3a; padding: 20px 80px;
-    display: flex; justify-content: space-between; align-items: center;
-    max-width: 1200px; margin: 0 auto;
-}
-.footer-l { display: flex; align-items: center; gap: 8px; font-size: 11px; color: #6b7a96; letter-spacing: 0.1em; }
-.footer-r { display: flex; align-items: center; gap: 16px; }
-.footer-badge { font-family: 'JetBrains Mono', monospace; font-size: 10px; color: #6b7a96; }
-.footer-online { font-family: 'JetBrains Mono', monospace; font-size: 10px; color: #2ECC71; display: flex; align-items: center; gap: 6px; }
-.footer-online::before { content:''; width:6px; height:6px; border-radius:50%; background:#2ECC71; display:inline-block; animation: pulseDot 2s infinite; }
-
-/* Streamlit button overrides */
+/* ── Buttons ── */
 .stButton > button {
-    background: rgba(46,204,113,0.1) !important;
-    border: 1px solid rgba(46,204,113,0.25) !important;
-    color: #2ECC71 !important;
-    font-family: 'JetBrains Mono', monospace !important;
-    font-size: 11px !important;
-    font-weight: 600 !important;
-    letter-spacing: 0.08em !important;
-    padding: 8px 20px !important;
-    border-radius: 5px !important;
+    background: #2ECC71 !important;
+    color: #0A0E1A !important;
+    font-family: 'Syne', sans-serif !important;
+    font-weight: 700 !important;
+    border: none !important;
+    border-radius: 10px !important;
+    padding: .6rem 1.6rem !important;
+    font-size: .95rem !important;
+    transition: all .25s ease !important;
+    width: 100%;
 }
 .stButton > button:hover {
-    background: rgba(46,204,113,0.2) !important;
-    border-color: #2ECC71 !important;
+    background: #27ae60 !important;
+    transform: translateY(-2px) !important;
+    box-shadow: 0 8px 24px rgba(46,204,113,.35) !important;
 }
-.stProgress > div > div > div { background-color: #2ECC71 !important; }
+.stButton > button:disabled {
+    background: rgba(46,204,113,.25) !important;
+    cursor: not-allowed !important;
+}
 
-/* Hide streamlit chrome */
-#MainMenu, footer[data-testid="stAppViewFooter"], header { visibility: hidden; }
+/* ── Progress bars ── */
+.stProgress > div > div > div { background: #2ECC71 !important; }
+
+/* ── Metrics ── */
+[data-testid="stMetric"] {
+    background: rgba(20,25,50,.55) !important;
+    border: 1px solid rgba(46,204,113,.18) !important;
+    border-radius: 14px !important;
+    padding: 1rem 1.2rem !important;
+    backdrop-filter: blur(12px) !important;
+}
+[data-testid="stMetricLabel"]  { color: #6B7A99 !important; font-family: 'Space Mono', monospace !important; font-size: .75rem !important; }
+[data-testid="stMetricValue"]  { color: #E8EAF6 !important; font-family: 'Space Mono', monospace !important; }
+[data-testid="stMetricDelta"]  { font-family: 'Space Mono', monospace !important; }
+
+/* ── Expanders ── */
+.streamlit-expanderHeader {
+    background: rgba(20,25,50,.55) !important;
+    border: 1px solid rgba(46,204,113,.12) !important;
+    border-radius: 10px !important;
+    color: #E8EAF6 !important;
+    font-family: 'Space Mono', monospace !important;
+}
+
+/* ── Code blocks ── */
+code, pre {
+    background: #060A14 !important;
+    color: #2ECC71 !important;
+    font-family: 'Space Mono', monospace !important;
+    font-size: .72rem !important;
+    border-radius: 6px !important;
+}
+
+/* ── Scrollbar ── */
+::-webkit-scrollbar { width: 5px; }
+::-webkit-scrollbar-track { background: #0A0E1A; }
+::-webkit-scrollbar-thumb { background: #27ae60; border-radius: 3px; }
+
+/* ── Custom cards ── */
+.ss-card {
+    background: rgba(20,25,50,.55);
+    border: 1px solid rgba(46,204,113,.18);
+    border-radius: 14px;
+    padding: 1.4rem 1.6rem;
+    backdrop-filter: blur(12px);
+    margin-bottom: 1rem;
+}
+.ss-badge {
+    display: inline-block;
+    padding: .25rem .65rem;
+    border-radius: 20px;
+    font-family: 'Space Mono', monospace;
+    font-size: .68rem;
+    font-weight: 700;
+    border: 1px solid;
+}
+.badge-critical { background: rgba(231,76,60,.15); color: #E74C3C; border-color: #E74C3C; }
+.badge-high     { background: rgba(243,156,18,.15); color: #F39C12; border-color: #F39C12; }
+.badge-medium   { background: rgba(52,152,219,.15); color: #3498DB; border-color: #3498DB; }
+.badge-clean    { background: rgba(46,204,113,.15); color: #2ECC71; border-color: #2ECC71; }
+.phase-row {
+    display: flex; align-items: center; gap: .8rem;
+    padding: .7rem 1rem;
+    background: rgba(255,255,255,.02);
+    border: 1px solid rgba(255,255,255,.06);
+    border-radius: 10px;
+    margin-bottom: .5rem;
+    font-family: 'Space Mono', monospace;
+    font-size: .75rem;
+}
 </style>
 """, unsafe_allow_html=True)
 
-# ── NAV ──
-st.markdown("""
-<div class="ss-nav">
-  <div class="nav-logo">
-    <span class="nav-logo-icon">⊕</span>
-    <div>
-      <div class="brand">SafeStay</div>
-      <div class="sub">By Gradient Forge</div>
-    </div>
-  </div>
-  <div class="nav-links">
-    <a href="#threat">The Threat</a>
-    <a href="#technology">Technology</a>
-    <a href="#simulation">Simulation</a>
-    <a href="#privacy">Privacy</a>
-  </div>
-  <a href="#" class="btn-cta">Get Early Access</a>
-</div>
-""", unsafe_allow_html=True)
+# ── Session State Defaults ────────────────────────────────────────────────────
+_defaults = {
+    "scan_result":     None,
+    "network_result":  None,
+    "report_meta":     None,
+    "scan_running":    False,
+    "scan_log":        [],
+    "room_image":      None,
+    "api_online":      None,
+}
+for k, v in _defaults.items():
+    if k not in st.session_state:
+        st.session_state[k] = v
 
-# ── HERO ──
-st.markdown("""
-<div class="ss-hero">
-  <div class="hero-content">
-    <div class="hero-badge"><span class="hero-badge-dot"></span> SafeStay V1.0 · On-Device AI</div>
-    <h1 class="hero-h1">You checked in.<br>But are you<br><span class="accent">really alone</span>?</h1>
-    <p class="hero-sub">Transform your smartphone into a professional-grade privacy shield. Scan rooms in <strong>60 seconds</strong> with AI-powered hidden camera detection.</p>
-    <div class="hero-actions">
-      <a href="#simulation" class="btn-scan">⊕ Start Scanning →</a>
-    </div>
-    <div class="hero-stats">
-      <div class="hero-stat">
-        <div class="num">0</div>
-        <div class="lbl">Data Leaves Device</div>
-      </div>
-      <div class="hero-stat">
-        <div class="num">&lt;60S</div>
-        <div class="lbl">Full Room Sweep</div>
-      </div>
-      <div class="hero-stat">
-        <div class="num">SHA-256</div>
-        <div class="lbl">Evidence Integrity</div>
-      </div>
-    </div>
-  </div>
-  <div class="radar-widget">
-    <div class="radar-top">
-      <span>Live Radar</span>
-      <span class="radar-online">Online</span>
-    </div>
-    <div style="background:#060d0a;height:200px;display:flex;align-items:center;justify-content:center;">
-      <svg viewBox="0 0 300 240" width="300" height="240" xmlns="http://www.w3.org/2000/svg">
-        <circle cx="150" cy="120" r="100" fill="none" stroke="rgba(46,204,113,0.12)" stroke-width="1"/>
-        <circle cx="150" cy="120" r="75" fill="none" stroke="rgba(46,204,113,0.12)" stroke-width="1"/>
-        <circle cx="150" cy="120" r="50" fill="none" stroke="rgba(46,204,113,0.12)" stroke-width="1"/>
-        <circle cx="150" cy="120" r="25" fill="none" stroke="rgba(46,204,113,0.12)" stroke-width="1"/>
-        <line x1="150" y1="20" x2="150" y2="220" stroke="rgba(46,204,113,0.1)" stroke-width="1"/>
-        <line x1="50" y1="120" x2="250" y2="120" stroke="rgba(46,204,113,0.1)" stroke-width="1"/>
-        <path d="M150,120 L240,80" stroke="rgba(46,204,113,0.9)" stroke-width="1.5"/>
-        <path d="M150,120 L240,80 A100,100 0 0,0 195,30 Z" fill="rgba(46,204,113,0.06)"/>
-        <circle cx="186" cy="83" r="5" fill="rgba(231,76,60,0.9)"/>
-        <circle cx="186" cy="83" r="9" fill="none" stroke="rgba(231,76,60,0.4)" stroke-width="1"/>
-        <circle cx="117" cy="65" r="4" fill="rgba(46,204,113,0.8)"/>
-        <circle cx="200" cy="155" r="4" fill="rgba(46,204,113,0.8)"/>
-      </svg>
-    </div>
-    <div class="radar-bottom">
-      <span class="rl">Targets</span>
-      <span class="radar-anomalies">2 Anomalies</span>
-    </div>
-  </div>
-</div>
-<div class="section-divider"></div>
-""", unsafe_allow_html=True)
 
-# ── THE THREAT ──
-st.markdown("""
-<div class="ss-section" id="threat">
-  <div class="section-label"><span class="section-label-line"></span> The Silent Epidemic</div>
-  <div class="threat-header">
-    <h2 class="threat-h2">The room is watching.<br><span class="dim">And it won't tell you.</span></h2>
-    <p class="threat-desc">Covert surveillance has become a cheap, consumer-grade threat. Travelers don't need better paranoia — they need better tools.</p>
-  </div>
-  <div class="stat-cards">
-    <div class="stat-card">
-      <div class="stat-card-top"><span class="stat-card-icon">👁</span><span class="stat-card-num-label">01</span></div>
-      <div class="stat-card-num">1 in 11</div>
-      <div class="stat-card-title">Short-term rentals affected</div>
-      <div class="stat-card-desc">Rentals audited in recent peer-reviewed studies contain hidden recording devices.</div>
-    </div>
-    <div class="stat-card">
-      <div class="stat-card-top"><span class="stat-card-icon">📵</span><span class="stat-card-num-label">02</span></div>
-      <div class="stat-card-num">700M</div>
-      <div class="stat-card-title">Annual hotel stays at risk</div>
-      <div class="stat-card-desc">Global hotel room nights exposed to covert surveillance threats every year.</div>
-    </div>
-    <div class="stat-card">
-      <div class="stat-card-top"><span class="stat-card-icon">⚠</span><span class="stat-card-num-label">03</span></div>
-      <div class="stat-card-num">92%</div>
-      <div class="stat-card-title">Average victims never notice</div>
-      <div class="stat-card-desc">Of covert cameras go undetected during a standard visual inspection.</div>
-    </div>
-  </div>
-  <p class="threat-sources" style="margin-top:24px">Sources: IPX1031 Traveler Study · Harvard Business School · Jacobs School of Engineering</p>
-</div>
-<div class="section-divider"></div>
-""", unsafe_allow_html=True)
+# ── Helper: API Calls ─────────────────────────────────────────────────────────
 
-# ── TECHNOLOGY ──
-st.markdown("""
-<div class="ss-section" id="technology">
-  <div class="section-label green"><span class="section-label-line"></span> The Privacy Shield</div>
-  <div class="tech-header">
-    <h2 class="tech-h2">Four layers.<br><span class="green">Zero blind spots.</span></h2>
-    <p class="tech-desc">Each layer runs on-device in parallel. No single surveillance technique — optical, wireless, or infrared — gets past all four.</p>
-  </div>
-  <div class="tech-grid">
-    <div class="tech-card">
-      <div class="tech-live-feed">
-        <div class="live-badge" style="position:absolute;top:12px;left:12px;">LIVE FEED</div>
-        <svg viewBox="0 0 580 160" width="100%" height="160" xmlns="http://www.w3.org/2000/svg" style="position:relative;z-index:2">
-          <rect width="580" height="160" fill="transparent"/>
-          <rect x="10" y="20" width="560" height="120" rx="4" fill="none" stroke="rgba(46,204,113,0.2)" stroke-width="1"/>
-          <line x1="10" y1="80" x2="570" y2="80" stroke="rgba(46,204,113,0.1)" stroke-width="1"/>
-          <rect x="240" y="55" width="100" height="50" rx="2" fill="none" stroke="rgba(231,76,60,0.5)" stroke-width="1.5"/>
-          <circle cx="290" cy="80" r="8" fill="rgba(231,76,60,0.3)" stroke="#E74C3C" stroke-width="1.5"/>
-          <text x="290" y="110" text-anchor="middle" fill="#E74C3C" font-size="9" font-family="JetBrains Mono">LENS DETECTED</text>
-          <text x="290" y="122" text-anchor="middle" fill="#E74C3C" font-size="8" font-family="JetBrains Mono">CONF: 0.94</text>
-        </svg>
-      </div>
-      <div class="tech-card-body">
-        <div class="tech-card-top">
-          <div style="display:flex;align-items:center;gap:10px">
-            <span class="tech-card-icon-box">🔍</span>
-            <span class="tech-card-layer">Layer · L01</span>
-          </div>
-          <span style="color:#6b7a96">↗</span>
-        </div>
-        <div class="tech-card-title">AI Optical Lens Detection</div>
-        <p class="tech-card-desc">Edge-based YOLOv8 model identifies retro-reflective lens glints the human eye misses — running entirely on your device.</p>
-        <div class="tech-card-tags">
-          <span class="tech-tag">On-Device YOLOv8</span>
-          <span class="tech-tag">Sub-2MM Lens Recognition</span>
-          <span class="tech-tag">No Cloud Upload</span>
-        </div>
-      </div>
+def api_get(path: str, timeout: int = 5) -> dict | None:
+    try:
+        r = requests.get(f"{API_BASE}{path}", timeout=timeout)
+        return r.json() if r.ok else None
+    except Exception:
+        return None
+
+def api_post(path: str, body: dict = {}, timeout: int = 30) -> dict | None:
+    try:
+        r = requests.post(f"{API_BASE}{path}", json=body, timeout=timeout)
+        return r.json() if r.ok else None
+    except Exception:
+        return None
+
+def check_api() -> bool:
+    h = api_get("/health", timeout=2)
+    online = h is not None and h.get("status") == "ok"
+    st.session_state.api_online = online
+    return online
+
+
+# ── Helper: Threat Badge HTML ─────────────────────────────────────────────────
+
+def threat_badge(level: str) -> str:
+    cls = {
+        "CRITICAL": "badge-critical",
+        "HIGH":     "badge-high",
+        "MEDIUM":   "badge-medium",
+        "LOW":      "badge-clean",
+        "CLEAN":    "badge-clean",
+    }.get(level.upper(), "badge-clean")
+    return f'<span class="ss-badge {cls}">{level}</span>'
+
+
+# ── Helper: Demo Scan Data ────────────────────────────────────────────────────
+
+def _demo_scan() -> dict:
+    return {
+        "session_id":      "demo_abc123",
+        "frames_analysed": 12,
+        "peak_score":      0.94,
+        "overall_level":   "CRITICAL",
+        "network_match":   True,
+        "ir_detected":     True,
+        "fusion_critical": True,
+        "camera_count":    2,
+        "detections": [
+            {
+                "frame_id": 4, "bbox": [192, 120, 333, 230],
+                "ai_confidence": 0.87, "host_object": "smoke detector",
+                "is_high_risk": True, "hough_radius": 11.4,
+                "coord_3d": {"x": 1.80, "y": 2.95, "z": 2.40},
+                "threat_score": 0.94, "threat_level": "CRITICAL",
+                "frame_hash": "a3f9e1b2c4d5e6f7a8b9c0d1e2f3a4b5c6d7e8f9a0b1c2d3e4f5a6b7c8d9e0f1",
+                "timestamp": time.time(),
+            },
+            {
+                "frame_id": 7, "bbox": [384, 264, 461, 326],
+                "ai_confidence": 0.61, "host_object": "clock",
+                "is_high_risk": True, "hough_radius": 7.2,
+                "coord_3d": {"x": 3.60, "y": 3.20, "z": 1.82},
+                "threat_score": 0.71, "threat_level": "HIGH",
+                "frame_hash": "b4a0f2e3d5c6b7a8f9e0d1c2b3a4f5e6d7c8b9a0f1e2d3c4b5a6f7e8d9c0b1a2",
+                "timestamp": time.time(),
+            },
+        ],
+    }
+
+def _demo_network() -> dict:
+    return {
+        "network_cidr": "192.168.1.0/24",
+        "device_count": 5, "camera_count": 2,
+        "scan_duration": 2.41,
+        "entropy_anomalies": ["192.168.1.10", "192.168.1.14"],
+        "devices": [
+            {"ip": "192.168.1.1",  "mac": "A4:08:F5:11:22:33", "vendor": "TP-Link Router",                    "is_camera": False, "entropy": 0.81},
+            {"ip": "192.168.1.10", "mac": "18:FE:34:AB:CD:EF", "vendor": "Espressif Systems (ESP32-CAM)",     "is_camera": True,  "entropy": 3.91},
+            {"ip": "192.168.1.14", "mac": "BC:01:A6:44:55:66", "vendor": "Hikvision Digital Technology",     "is_camera": True,  "entropy": 4.12},
+            {"ip": "192.168.1.20", "mac": "00:1A:2B:3C:4D:5E", "vendor": "Apple, Inc.",                      "is_camera": False, "entropy": 1.22},
+            {"ip": "192.168.1.22", "mac": "F0:18:98:10:20:30", "vendor": "Samsung Electronics",              "is_camera": False, "entropy": 0.97},
+        ],
+        "camera_devices": [
+            {"ip": "192.168.1.10", "mac": "18:FE:34:AB:CD:EF", "vendor": "Espressif Systems (ESP32-CAM)", "is_camera": True, "entropy": 3.91},
+            {"ip": "192.168.1.14", "mac": "BC:01:A6:44:55:66", "vendor": "Hikvision Digital Technology",  "is_camera": True, "entropy": 4.12},
+        ],
+    }
+
+
+# ── 60-Second Interactive Scan ────────────────────────────────────────────────
+
+def run_interactive_scan():
+    """
+    Runs the 4-layer 60-second scan simulation with live progress updates.
+    Tries the real FastAPI backend first; falls back to demo data.
+    """
+    st.session_state.scan_running = True
+    st.session_state.scan_log     = []
+    api_live = check_api()
+
+    phases = [
+        {
+            "name":  "📡 Network Heartbeat",
+            "steps": [
+                (1.2, "Initialising passive Scapy sniffer…"),
+                (2.0, "ARP sweep 192.168.1.0/24 — 5 devices found"),
+                (1.8, "Cross-referencing MAC OUI database…"),
+                (1.5, "⚠ Espressif ESP32-CAM at 192.168.1.10 flagged"),
+                (1.0, "Shannon Entropy: 3.91 bits (ANOMALOUS)"),
+                (0.8, "Network phase complete — 2 camera vendors"),
+            ],
+        },
+        {
+            "name":  "🎯 AI Lens Detection",
+            "steps": [
+                (1.0, "Loading YOLOv8n model (TFLite INT8)…"),
+                (1.5, "Frame 1/12: Hough circle scan initiated"),
+                (1.8, "Frame 4/12: lens signature @ smoke detector"),
+                (1.2, "ThreatScorer: AI=0.87 + HOST=1 → 0.92"),
+                (1.3, "Frame 9/12: secondary lens in clock — 0.71"),
+                (0.7, "AI scan complete — CRITICAL confirmed"),
+            ],
+        },
+        {
+            "name":  "💡 IR Frequency Scan",
+            "steps": [
+                (0.8, "Camera2: ISO=3200, shutter=100ms, AE=OFF"),
+                (1.5, "HSV range [115–165°] blob detection…"),
+                (1.8, "IR blob detected: cx=312 cy=201 r=8.2px"),
+                (1.2, "Persistence filter: 3/3 frames confirmed"),
+                (0.8, "IR source active — 850nm emission confirmed"),
+            ],
+        },
+        {
+            "name":  "🔐 Evidence Vault",
+            "steps": [
+                (0.8, "Compiling 3D coordinate map…"),
+                (1.2, "SHA-256 hashing 12 scan frames…"),
+                (1.5, "RSA-2048 signing certificate…"),
+                (1.0, "ReportLab PDF certificate building…"),
+                (0.8, "SafeStay_Report_CRITICAL.pdf sealed ✓"),
+            ],
+        },
+    ]
+
+    scan_placeholder  = st.empty()
+    total_steps = sum(len(p["steps"]) for p in phases)
+    step_done   = 0
+
+    for pi, phase in enumerate(phases):
+        with scan_placeholder.container():
+            st.markdown(f"### {phase['name']}")
+            log_box = st.empty()
+            bar     = st.progress(0)
+
+        logs = []
+        for si, (delay, msg) in enumerate(phase["steps"]):
+            time.sleep(delay)
+            logs.append(f"> {msg}")
+            step_done += 1
+            overall_pct = step_done / total_steps
+            bar.progress((si + 1) / len(phase["steps"]))
+            log_box.code("\n".join(logs[-6:]), language="bash")
+            st.session_state.scan_log.append(msg)
+
+        # Real API call at end of each phase
+        if api_live:
+            if pi == 0:
+                r = api_post("/scan/network", {"network": "auto", "passive": True})
+                if r:
+                    st.session_state.network_result = r
+            elif pi == 1:
+                r = api_post("/scan/ai", {"source": 0, "num_frames": 12,
+                                          "network_match": True, "ir_detected": True})
+                if r:
+                    st.session_state.scan_result = r
+
+    # Populate demo data if API was offline
+    if not st.session_state.scan_result:
+        st.session_state.scan_result = _demo_scan()
+    if not st.session_state.network_result:
+        st.session_state.network_result = _demo_network()
+
+    # Render 3D room with threat markers
+    try:
+        img_bytes = render_room(st.session_state.scan_result)
+        st.session_state.room_image = img_bytes
+    except Exception as e:
+        st.session_state.room_image = None
+
+    st.session_state.scan_running = False
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# SIDEBAR
+# ─────────────────────────────────────────────────────────────────────────────
+
+with st.sidebar:
+    st.markdown("""
+    <div style='text-align:center;padding:1rem 0 .5rem'>
+        <div style='font-size:2.5rem'>🛡</div>
+        <div style='font-family:Syne,sans-serif;font-size:1.3rem;font-weight:800;color:#fff'>SafeStay</div>
+        <div style='font-family:"Space Mono",monospace;font-size:.65rem;color:#6B7A99'>AI PRIVACY SHIELD v2.3</div>
     </div>
-    <div>
-      <div class="tech-card" style="margin-bottom:18px">
-        <div class="tech-card-body">
-          <div class="tech-card-top">
-            <div style="display:flex;align-items:center;gap:10px">
-              <span class="tech-card-icon-box">📶</span>
-              <span class="tech-card-layer">Layer · L02</span>
-            </div>
-          </div>
-          <div class="tech-card-title">Network Security Scanner</div>
-          <p class="tech-card-desc">Passively maps every device on the local Wi-Fi and flags suspicious MAC vendor signatures from known surveillance OEMs.</p>
-          <div class="tech-card-tags">
-            <span class="tech-tag">Vendor OUI Lookup</span>
-            <span class="tech-tag">ARP + mDNS Sweep</span>
-          </div>
-        </div>
-      </div>
-      <div class="tech-card" style="margin-bottom:18px">
-        <div class="tech-card-body">
-          <div class="tech-card-top">
-            <div style="display:flex;align-items:center;gap:10px">
-              <span class="tech-card-icon-box">💡</span>
-              <span class="tech-card-layer">Layer · L03</span>
-            </div>
-          </div>
-          <div class="tech-card-title">Infrared Flash Finder</div>
-          <p class="tech-card-desc">Activates your front camera's IR sensitivity to reveal hidden night-vision LEDs invisible to the naked eye.</p>
-          <div class="tech-card-tags">
-            <span class="tech-tag">850–940NM Band</span>
-            <span class="tech-tag">Auto-Capture Evidence</span>
-          </div>
-        </div>
-      </div>
-      <div class="tech-card">
-        <div class="tech-card-body">
-          <div class="tech-card-top">
-            <div style="display:flex;align-items:center;gap:10px">
-              <span class="tech-card-icon-box">🔒</span>
-              <span class="tech-card-layer">Layer · L04</span>
-            </div>
-          </div>
-          <div class="tech-card-title">Evidence Vault</div>
-          <p class="tech-card-desc">Every scan is sealed with a SHA-256 chain-of-custody hash and a timestamped, court-admissible report.</p>
-          <div class="tech-card-tags">
-            <span class="tech-tag">SHA-256 Tamper-Proof</span>
-            <span class="tech-tag">Legal-Ready PDF Export</span>
-          </div>
-        </div>
-      </div>
-    </div>
-  </div>
-</div>
-<div class="section-divider"></div>
-""", unsafe_allow_html=True)
+    """, unsafe_allow_html=True)
+    st.divider()
 
-# ── SIMULATION ──
-st.markdown("""
-<div class="ss-section" id="simulation">
-  <div class="section-label green"><span class="section-label-line"></span> 60-Second Scan · Live Simulation</div>
-  <div style="display:grid;grid-template-columns:1fr 1fr;gap:60px;margin-bottom:50px;align-items:end">
-    <h2 class="sim-h2" style="font-size:48px;font-weight:900;color:#e8edf5">Press start.<br><span style="color:#6b7a96">Watch it work.</span></h2>
-    <p style="font-size:15px;color:#8892a4;line-height:1.75">A faithful UI preview of what a production scan looks like — three phases, one sealed evidence report.</p>
-  </div>
-</div>
-""", unsafe_allow_html=True)
+    # API status
+    if st.button("⚡ Check Backend"):
+        check_api()
+    api_status = st.session_state.api_online
+    if api_status is True:
+        st.success("API Online ✓")
+    elif api_status is False:
+        st.error("API Offline — Demo mode active")
+    else:
+        st.info("Press 'Check Backend' to test")
 
-# Simulation state
-if "sim_running" not in st.session_state:
-    st.session_state.sim_running = False
-if "sim_done" not in st.session_state:
-    st.session_state.sim_done = False
-if "session_num" not in st.session_state:
-    st.session_state.session_num = random.randint(1000, 9999)
-
-LOG_SCRIPT = [
-    (0,    "— phase 1/3 · NETWORK CHECK —", "header"),
-    (1,    "> scanning local Wi-Fi...", ""),
-    (2,    "  arp sweep complete", ""),
-    (3,    "  devices found: 7", ""),
-    (4,    "  checking MAC vendor OUI database...", ""),
-    (5,    "✓ 6 devices — known vendors", "green"),
-    (6,    "✗ 1 device — vendor: unknown OEM (flagged)", "red"),
-    (7,    "  mDNS probe: no hidden services", ""),
-    (8,    "✓ phase 1 complete · 1 anomaly detected", "green"),
-    (9,    "— phase 2/3 · AI LENS SCAN —", "header"),
-    (10,   "> enabling rear camera · YOLOv8 loaded", ""),
-    (11,   "  scanning frame 0001...", ""),
-    (12,   "  scanning frame 0087...", ""),
-    (13,   "  lens glint detected · confidence 0.94", "red"),
-    (14,   "  triangulating position...", ""),
-    (15,   "✗ lens glint detected · object 2 of 3", "red"),
-    (16,   "  auto-capture evidence", ""),
-    (17,   "✓ phase 2 complete · 2 anomalies detected", "green"),
-    (18,   "— phase 3/3 · IR FREQUENCY SCAN —", "header"),
-    (19,   "> enable front.cam ir_filter=off", ""),
-    (20,   "  sweeping 850–940nm band...", ""),
-    (21,   "  ambient IR: 3.2μW/cm² — nominal", ""),
-    (22,   "✓ no active IR emitters detected", "green"),
-    (23,   "— SCAN COMPLETE ——", "header"),
-    (24,   "✓ session sealed · SHA-256 verified", "green"),
-    (25,   "✓ report.pdf ready for authorities", "green"),
-]
-
-with st.container():
-    st.markdown(f"""
-    <div class="ss-section" style="padding-top:0;padding-bottom:20px">
-    <div class="sim-terminal">
-      <div class="sim-titlebar">
-        <div style="display:flex;align-items:center;gap:16px">
-          <div class="sim-dots">
-            <span class="sim-dot-r"></span>
-            <span class="sim-dot-y"></span>
-            <span class="sim-dot-g"></span>
-          </div>
-          <span class="sim-session">SAFESTAY://SCAN · SESSION {st.session_state.session_num}</span>
-        </div>
-      </div>
-    </div>
+    st.divider()
+    st.markdown("**Detection Layers**")
+    st.markdown("""
+    <div style='font-family:"Space Mono",monospace;font-size:.72rem;color:#6B7A99'>
+    📡 Network Heartbeat<br/>
+    🎯 YOLOv8 AI Lens<br/>
+    💡 IR Frequency Scan<br/>
+    🔐 Evidence Vault
     </div>
     """, unsafe_allow_html=True)
 
-    col_btn1, col_btn2, col_spacer = st.columns([1, 1, 8])
-    with col_btn1:
-        run_clicked = st.button("▷ RUN SCAN", key="run_btn")
-    with col_btn2:
-        reset_clicked = st.button("↺ RESET", key="reset_btn")
+    st.divider()
+    st.markdown("**Tech Stack**")
+    for tag in ["YOLOv8 · OpenCV", "Scapy + ARP", "Shannon Entropy",
+                "RSA-2048 + SHA-256", "ReportLab PDF", "PyVista 3D"]:
+        st.markdown(
+            f'<span class="ss-badge badge-clean" style="margin:.15rem .1rem;display:inline-block">{tag}</span>',
+            unsafe_allow_html=True
+        )
 
-    if reset_clicked:
-        st.session_state.sim_running = False
-        st.session_state.sim_done = False
-        st.session_state.session_num = random.randint(1000, 9999)
-        st.rerun()
 
-    # Phase indicators
-    phase1_done = st.session_state.sim_done
-    phase2_done = st.session_state.sim_done
-    phase3_done = st.session_state.sim_done
+# ─────────────────────────────────────────────────────────────────────────────
+# MAIN CONTENT
+# ─────────────────────────────────────────────────────────────────────────────
 
-    st.markdown(f"""
-    <div style="max-width:1200px;margin:0 auto;padding:0 80px">
-    <div class="sim-phases">
-      <div class="sim-phase">
-        <div class="sim-phase-left">
-          <span class="sim-phase-icon">📶</span>
-          <div>
-            <div class="ph-label">Phase 1</div>
-            <div class="ph-name">Network Check</div>
-          </div>
-        </div>
-        <span class="sim-check {'done' if phase1_done else ''}">{'✓' if phase1_done else '◎'}</span>
-      </div>
-      <div class="sim-phase">
-        <div class="sim-phase-left">
-          <span class="sim-phase-icon">🔍</span>
-          <div>
-            <div class="ph-label">Phase 2</div>
-            <div class="ph-name">AI Lens Scan</div>
-          </div>
-        </div>
-        <span class="sim-check {'done' if phase2_done else ''}">{'✓' if phase2_done else '◎'}</span>
-      </div>
-      <div class="sim-phase">
-        <div class="sim-phase-left">
-          <span class="sim-phase-icon">💡</span>
-          <div>
-            <div class="ph-label">Phase 3</div>
-            <div class="ph-name">IR Frequency Scan</div>
-          </div>
-        </div>
-        <span class="sim-check {'done' if phase3_done else ''}">{'✓' if phase3_done else '◎'}</span>
-      </div>
+# ── Header ────────────────────────────────────────────────────────────────────
+st.markdown("""
+<div style='padding:1.5rem 0 .5rem'>
+    <div style='font-family:"Space Mono",monospace;font-size:.68rem;letter-spacing:.14em;
+                color:#2ECC71;margin-bottom:.6rem'>
+        ● AI PRIVACY SHIELD &nbsp;·&nbsp; GRADIENT FORGE
     </div>
+    <h1 style='font-family:Syne,sans-serif;font-size:2.6rem;font-weight:800;color:#fff;
+               line-height:1.1;margin:0'>
+        You checked in.<br/>
+        <span style='color:#2ECC71'>But are you really alone?</span>
+    </h1>
+    <p style='color:#6B7A99;margin:.8rem 0 0;font-size:.95rem;max-width:600px'>
+        Transform your smartphone into a professional-grade privacy shield.
+        Detect hidden cameras in <strong style='color:#E8EAF6'>60 seconds</strong>
+        using AI vision, passive network analysis, and IR detection.
+    </p>
+</div>
+""", unsafe_allow_html=True)
+
+st.divider()
+
+# ── Top Metrics ───────────────────────────────────────────────────────────────
+scan_r = st.session_state.scan_result
+net_r  = st.session_state.network_result
+
+m1, m2, m3, m4, m5 = st.columns(5)
+with m1:
+    lvl = scan_r["overall_level"] if scan_r else "—"
+    st.metric("Threat Level", lvl, delta="CRITICAL" if lvl == "CRITICAL" else None,
+              delta_color="inverse")
+with m2:
+    score = f"{scan_r['peak_score']*100:.1f}%" if scan_r else "—"
+    st.metric("Peak Score", score)
+with m3:
+    cams = scan_r["camera_count"] if scan_r else "—"
+    st.metric("Cameras Found", cams)
+with m4:
+    net_cams = net_r["camera_count"] if net_r else "—"
+    st.metric("Network Cameras", net_cams)
+with m5:
+    fusion = "YES 🚨" if (scan_r and scan_r.get("fusion_critical")) else ("NO ✓" if scan_r else "—")
+    st.metric("Fusion CRITICAL", fusion)
+
+st.divider()
+
+# ── 3D Digital Twin + Scan Button ────────────────────────────────────────────
+col_3d, col_ctrl = st.columns([2, 1])
+
+with col_3d:
+    st.markdown("### 🏨 3D Digital Twin")
+    st.markdown(
+        '<div style=\'font-family:"Space Mono",monospace;font-size:.7rem;color:#6B7A99;margin-bottom:.8rem\'>'
+        'Red spheres = detected threats · Drop lines show floor projection · Labels show host object + score'
+        '</div>',
+        unsafe_allow_html=True,
+    )
+
+    if st.session_state.room_image:
+        st.image(st.session_state.room_image, use_container_width=True)
+    elif st.session_state.scan_result:
+        with st.spinner("Rendering 3D scene…"):
+            try:
+                img = render_room(st.session_state.scan_result)
+                st.session_state.room_image = img
+                st.image(img, use_container_width=True)
+            except Exception as e:
+                st.warning(f"3D render failed: {e} — check PyVista/Matplotlib install")
+    else:
+        # Show empty room placeholder
+        try:
+            empty_img = render_empty_room()
+            st.image(empty_img, caption="Run a scan to place threat markers", use_container_width=True)
+        except Exception:
+            st.info("🏨 3D room will render here after scanning")
+
+with col_ctrl:
+    st.markdown("### ▶ Interactive Scan")
+    st.markdown("""
+    <div style='font-family:"Space Mono",monospace;font-size:.72rem;color:#6B7A99;margin-bottom:1rem;line-height:1.7'>
+    Runs all 4 detection layers<br/>
+    in sequence over 60 seconds.<br/><br/>
+    <span style='color:#2ECC71'>Layer 1:</span> Network ARP + Entropy<br/>
+    <span style='color:#2ECC71'>Layer 2:</span> YOLOv8 Lens AI<br/>
+    <span style='color:#2ECC71'>Layer 3:</span> IR Frequency Scan<br/>
+    <span style='color:#2ECC71'>Layer 4:</span> Forensic PDF
     </div>
     """, unsafe_allow_html=True)
 
-    # Progress bar
-    progress_placeholder = st.empty()
-    log_placeholder = st.empty()
+    if not st.session_state.scan_running:
+        if st.button("▶ Run 60-Second Scan", key="scan_btn"):
+            run_interactive_scan()
+            st.rerun()
+    else:
+        st.warning("⏳ Scan in progress…")
 
-    if not run_clicked and not st.session_state.sim_done:
-        progress_placeholder.markdown("""
-        <div style="max-width:1200px;margin:0 auto;padding:12px 80px 0">
-          <div style="display:flex;justify-content:space-between;margin-bottom:8px">
-            <span style="font-size:10px;font-weight:600;letter-spacing:0.12em;text-transform:uppercase;color:#6b7a96">PROGRESS</span>
-            <span style="font-family:'JetBrains Mono',monospace;font-size:11px;color:#2ECC71">0% · 60S Remaining</span>
-          </div>
-        </div>
-        """, unsafe_allow_html=True)
-        log_placeholder.markdown("""
-        <div style="max-width:1200px;margin:0 auto;padding:0 80px 20px">
-          <div class="sim-log"><div class="log-dim">// Ready. Press RUN SCAN to start simulation.</div></div>
-        </div>
-        """, unsafe_allow_html=True)
-
-    if run_clicked:
-        st.session_state.sim_running = True
-        st.session_state.session_num = random.randint(1000, 9999)
-        log_lines = []
-
-        for i, (step, text, cls) in enumerate(LOG_SCRIPT):
-            pct = int((i + 1) / len(LOG_SCRIPT) * 100)
-            remaining = max(0, 60 - int(i * 60 / len(LOG_SCRIPT)))
-
-            log_lines.append((text, cls))
-            log_html = ""
-            for lt, lc in log_lines:
-                color_class = {"green": "log-green", "red": "log-red", "header": "log-header", "": "log-dim"}.get(lc, "log-dim")
-                log_html += f'<div class="{color_class}">{lt}</div>'
-
-            progress_placeholder.markdown(f"""
-            <div style="max-width:1200px;margin:0 auto;padding:12px 80px 0">
-              <div style="display:flex;justify-content:space-between;margin-bottom:8px">
-                <span style="font-size:10px;font-weight:600;letter-spacing:0.12em;text-transform:uppercase;color:#6b7a96">PROGRESS</span>
-                <span style="font-family:'JetBrains Mono',monospace;font-size:11px;color:#2ECC71">{pct}% · {remaining}S Remaining</span>
-              </div>
-              <div style="height:4px;background:rgba(255,255,255,0.07);border-radius:2px;overflow:hidden;margin-bottom:14px">
-                <div style="height:100%;background:#2ECC71;border-radius:2px;width:{pct}%;transition:width 0.3s"></div>
-              </div>
+    if scan_r:
+        lvl   = scan_r.get("overall_level", "UNKNOWN")
+        score = scan_r.get("peak_score", 0)
+        icon  = "🚨" if lvl == "CRITICAL" else ("⚠️" if lvl == "HIGH" else "✅")
+        st.markdown(f"""
+        <div class='ss-card' style='margin-top:1rem;text-align:center'>
+            <div style='font-size:2rem'>{icon}</div>
+            <div style='font-family:Syne,sans-serif;font-weight:800;font-size:1.1rem;
+                        color:{"#E74C3C" if lvl in ("CRITICAL","HIGH") else "#2ECC71"}'>
+                {lvl}
             </div>
-            """, unsafe_allow_html=True)
-
-            log_placeholder.markdown(f"""
-            <div style="max-width:1200px;margin:0 auto;padding:0 80px 20px">
-              <div class="sim-log">{log_html}</div>
+            <div style='font-family:"Space Mono",monospace;font-size:.72rem;color:#6B7A99;margin-top:.3rem'>
+                Score: {score*100:.1f}% · {scan_r.get("camera_count",0)} device(s)
             </div>
-            """, unsafe_allow_html=True)
-            time.sleep(0.55)
-
-        st.session_state.sim_done = True
-        st.session_state.sim_running = False
-        st.rerun()
-
-    if st.session_state.sim_done:
-        all_log = "".join([
-            f'<div class="{"log-green" if c=="green" else "log-red" if c=="red" else "log-header" if c=="header" else "log-dim"}">{t}</div>'
-            for _, t, c in LOG_SCRIPT
-        ])
-        progress_placeholder.markdown("""
-        <div style="max-width:1200px;margin:0 auto;padding:12px 80px 0">
-          <div style="display:flex;justify-content:space-between;margin-bottom:8px">
-            <span style="font-size:10px;font-weight:600;letter-spacing:0.12em;text-transform:uppercase;color:#6b7a96">PROGRESS</span>
-            <span style="font-family:'JetBrains Mono',monospace;font-size:11px;color:#2ECC71">100% · Complete</span>
-          </div>
-          <div style="height:4px;background:rgba(255,255,255,0.07);border-radius:2px;overflow:hidden;margin-bottom:14px">
-            <div style="height:100%;background:#2ECC71;border-radius:2px;width:100%"></div>
-          </div>
-        </div>
-        """, unsafe_allow_html=True)
-        log_placeholder.markdown(f"""
-        <div style="max-width:1200px;margin:0 auto;padding:0 80px 20px">
-          <div class="sim-log">{all_log}</div>
         </div>
         """, unsafe_allow_html=True)
 
-st.markdown('<div class="section-divider"></div>', unsafe_allow_html=True)
+st.divider()
 
-# ── PRIVACY / TRUST ──
+# ── Network Analysis ──────────────────────────────────────────────────────────
+st.markdown("### 📡 Network Heartbeat Analysis")
+if net_r:
+    dev_col, entropy_col = st.columns([3, 1])
+    with dev_col:
+        devices = net_r.get("devices", [])
+        if devices:
+            import pandas as pd
+            df = pd.DataFrame([{
+                "IP":         d["ip"],
+                "MAC":        d["mac"],
+                "Vendor":     d["vendor"],
+                "Camera?":    "⚠ YES" if d["is_camera"] else "✓ NO",
+                "Entropy":    f"{d.get('entropy', 0):.2f} bits",
+            } for d in devices])
+            st.dataframe(
+                df,
+                use_container_width = True,
+                hide_index          = True,
+                column_config       = {
+                    "Camera?":  st.column_config.TextColumn("Camera?",  width="small"),
+                    "Entropy":  st.column_config.TextColumn("Entropy",  width="small"),
+                },
+            )
+    with entropy_col:
+        anomalies = net_r.get("entropy_anomalies", [])
+        st.metric("Devices Found",  net_r.get("device_count", 0))
+        st.metric("Camera Vendors", net_r.get("camera_count", 0))
+        st.metric("Entropy Flags",  len(anomalies))
+        if anomalies:
+            st.error("High entropy:\n" + "\n".join(anomalies))
+else:
+    st.info("Run a scan to see network device analysis.")
+
+st.divider()
+
+# ── Detection Details ─────────────────────────────────────────────────────────
+st.markdown("### 🎯 Detection Details — 3D Coordinates")
+if scan_r and scan_r.get("detections"):
+    for d in scan_r["detections"]:
+        c     = d["coord_3d"]
+        level = d["threat_level"]
+        icon  = "🔴" if level == "CRITICAL" else ("🟠" if level == "HIGH" else "🟡")
+        with st.expander(
+            f"{icon} {d.get('host_object','Unknown')} — {level}  "
+            f"({c['x']}m, {c['y']}m, {c['z']}m)  score: {d['threat_score']*100:.1f}%"
+        ):
+            c1, c2, c3 = st.columns(3)
+            c1.metric("AI Confidence",  f"{d['ai_confidence']*100:.1f}%")
+            c2.metric("Hough Radius",   f"{d.get('hough_radius') or '—'} px")
+            c3.metric("High-Risk Host", "YES" if d["is_high_risk"] else "NO")
+            st.markdown("**3D Room Coordinate (metres)**")
+            st.code(f"x={c['x']:.3f}  y={c['y']:.3f}  z={c['z']:.3f}", language="text")
+            st.markdown("**Frame SHA-256**")
+            st.code(d["frame_hash"], language="text")
+else:
+    st.info("No detections yet — run a scan first.")
+
+st.divider()
+
+# ── Forensic Evidence Vault ───────────────────────────────────────────────────
+st.markdown("### 🔐 Forensic Evidence Vault")
+ev_col1, ev_col2 = st.columns(2)
+
+with ev_col1:
+    st.markdown("**Generate RSA-Signed PDF Certificate**")
+    if st.button("📄 Generate Report PDF", key="gen_report"):
+        with st.spinner("Building forensic PDF…"):
+            if check_api():
+                meta = api_post("/generate-report", {})
+            else:
+                # Local fallback using forensics module
+                try:
+                    sys.path.insert(0, str(Path(__file__).parent.parent / "backend"))
+                    from forensics import ForensicReportBuilder  # type: ignore
+                    builder = ForensicReportBuilder()
+                    sd  = st.session_state.scan_result or _demo_scan()
+                    nr  = st.session_state.network_result
+                    meta = builder.build(sd, nr)
+                except Exception as e:
+                    meta = None
+                    st.error(f"Report generation failed: {e}")
+
+            if meta:
+                st.session_state.report_meta = meta
+                st.success("✓ PDF certificate generated and RSA-signed")
+
+    if st.session_state.report_meta:
+        meta = st.session_state.report_meta
+        st.markdown("**Certificate Details**")
+        st.markdown(f"""
+        <div class='ss-card'>
+            <div style='font-family:"Space Mono",monospace;font-size:.72rem;line-height:1.9;color:#6B7A99'>
+                <span style='color:#2ECC71'>STATUS:</span> {meta.get('status','—').upper()}<br/>
+                <span style='color:#2ECC71'>GENERATED:</span> {meta.get('generated_at','—')[:19]} UTC<br/>
+                <span style='color:#2ECC71'>SHA-256 (first 32):</span> {meta.get('sha256_hash','')[:32]}…<br/>
+                <span style='color:#2ECC71'>COORD HASH (first 32):</span> {meta.get('coord_hash','')[:32]}…<br/>
+                <span style='color:#2ECC71'>RSA SIG (first 32):</span> {meta.get('rsa_signature','')[:32]}…
+            </div>
+        </div>
+        """, unsafe_allow_html=True)
+
+        if check_api():
+            st.link_button("⬇ Download PDF", f"{API_BASE}/api/report/download")
+
+with ev_col2:
+    st.markdown("**Verify Scan Integrity**")
+    st.markdown(
+        '<div style=\'font-family:"Space Mono",monospace;font-size:.72rem;color:#6B7A99;margin-bottom:.8rem\'>'
+        'Re-hashes the 3D scan data and compares to the signed certificate. '
+        'Any tampering will cause a mismatch.'
+        '</div>',
+        unsafe_allow_html=True,
+    )
+
+    if st.button("🔍 Verify Integrity", key="verify_btn"):
+        meta = st.session_state.report_meta
+        sd   = st.session_state.scan_result
+        if not meta or not sd:
+            st.warning("Generate a report and run a scan first.")
+        else:
+            expected = meta.get("sha256_hash", "")
+            # Local verification
+            canonical = json.dumps(sd, sort_keys=True, ensure_ascii=True)
+            computed  = hashlib.sha256(canonical.encode()).hexdigest()
+            match     = computed == expected
+
+            if match:
+                st.success("✅ Integrity VERIFIED — scan data matches signed certificate")
+            else:
+                st.error("❌ Integrity FAILED — data may have been tampered with")
+
+            col_a, col_b = st.columns(2)
+            col_a.markdown("**Computed Hash**")
+            col_a.code(computed[:32] + "…", language="text")
+            col_b.markdown("**Certificate Hash**")
+            col_b.code(expected[:32] + "…", language="text")
+
+st.divider()
+
+# ── Scan Log ──────────────────────────────────────────────────────────────────
+if st.session_state.scan_log:
+    with st.expander("📋 Scan Log", expanded=False):
+        log_text = "\n".join(f"> {line}" for line in st.session_state.scan_log)
+        st.code(log_text, language="bash")
+
+# ── Footer ────────────────────────────────────────────────────────────────────
 st.markdown("""
-<div class="ss-section" id="privacy">
-  <div class="section-label green"><span class="section-label-line"></span> Trust Architecture</div>
-  <div style="display:grid;grid-template-columns:1fr 1fr;gap:60px;margin-bottom:50px;align-items:end">
-    <h2 style="font-size:48px;font-weight:900;line-height:1.1;color:#e8edf5">Your scan. Your device.<br><span style="color:#2ECC71">Nobody else's business.</span></h2>
-    <p style="font-size:15px;color:#8892a4;line-height:1.75">SafeStay is engineered so that privacy isn't a policy — it's physically impossible for us to see your data.</p>
-  </div>
-  <div class="trust-cards">
-    <div class="trust-card">
-      <div class="trust-card-icon">🚫</div>
-      <div class="trust-card-title">Zero-Cloud Privacy</div>
-      <p class="trust-card-desc">All video, audio, and Wi-Fi analysis runs on-device. Nothing ever reaches our servers — because there are none for your scan data.</p>
-    </div>
-    <div class="trust-card">
-      <div class="trust-card-icon">⚖</div>
-      <div class="trust-card-title">Legal Ready</div>
-      <p class="trust-card-desc">Evidence Vault reports are SHA-256 hashed and timestamped — admissible chain-of-custody for police and civil proceedings.</p>
-    </div>
-    <div class="trust-card">
-      <div class="trust-card-icon">🖥</div>
-      <div class="trust-card-title">On-Device AI</div>
-      <p class="trust-card-desc">Neural inference runs locally via CoreML & TFLite. Scans work offline, in airplane mode, and in unfamiliar networks.</p>
-    </div>
-    <div class="trust-card">
-      <div class="trust-card-icon">🔐</div>
-      <div class="trust-card-title">End-to-End Sealed</div>
-      <p class="trust-card-desc">Exports are encrypted with a key that never leaves your device. You decide who sees the report — and when.</p>
-    </div>
-  </div>
-  <div class="cta-banner">
-    <div>
-      <div class="cta-banner-label">Early Access · Limited Beta</div>
-      <div class="cta-banner-title">Be among the first 1,000 travelers to scan with SafeStay.</div>
-    </div>
-    <a href="#" class="btn-cta" style="font-size:15px;padding:16px 32px;flex-shrink:0">⊕ Claim My Spot</a>
-  </div>
-</div>
-
-<div class="ss-footer">
-  <div class="footer-l">
-    <span>⊕ SafeStay</span>
-    <span style="color:#1e2a3a">·</span>
-    <span>A Gradient Forge Product</span>
-  </div>
-  <div class="footer-r">
-    <span class="footer-badge">Beta</span>
-    <span class="footer-online">All Systems Nominal</span>
-  </div>
+<div style='text-align:center;padding:2rem 0 1rem;
+            font-family:"Space Mono",monospace;font-size:.65rem;color:rgba(107,122,153,.5)'>
+    🛡 SafeStay AI Core v2.3 · Gradient Forge · 
+    For personal privacy protection in rented accommodations ·
+    Report suspicious findings to local authorities
 </div>
 """, unsafe_allow_html=True)
